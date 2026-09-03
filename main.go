@@ -115,9 +115,9 @@ func main() {
 	if !isSingle {
 		os.Exit(0)
 	}
-}
 	userDataDir := getUserDataDir()
-	iconFullPath, _ := filepath.Abs("icon.ico")
+	executablePath, _ := os.Executable()
+	iconFullPath := filepath.Join(filepath.Dir(executablePath), "icon.ico")
 
 	opts := webview2.WebViewOptions{
 		Window:    nil,

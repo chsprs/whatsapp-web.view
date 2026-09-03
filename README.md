@@ -9,6 +9,7 @@ Lightweight Windows desktop wrapper for [WhatsApp Web](https://web.whatsapp.com)
 - Cookies, LocalStorage, IndexedDB, and service-worker data stored in a dedicated profile.
 - Dark Windows title bar and frame.
 - Windows toast notification bridge.
+- Camera and microphone access for WhatsApp voice and video calls.
 - Single-instance protection.
 - High-DPI display support.
 - Small native executable.
@@ -23,7 +24,7 @@ Lightweight Windows desktop wrapper for [WhatsApp Web](https://web.whatsapp.com)
 
 Download `WhatsApp.exe` from the latest [GitHub Release](https://github.com/Adytm404/whatsapp-web.view/releases).
 
-Run the executable, scan the QR code, and keep using WhatsApp normally. The session is saved automatically.
+Run the executable, scan the QR code, allow camera and microphone access when prompted by Windows, and keep using WhatsApp normally. The session is saved automatically.
 
 ## Session Data
 
