@@ -20,11 +20,14 @@ Lightweight Windows desktop wrapper for [WhatsApp Web](https://web.whatsapp.com)
 - Microsoft Edge WebView2 Runtime. The app can download it automatically when missing.
 - WhatsApp account paired with WhatsApp Web.
 
-## Download
+## Download & Installation
 
-Download `WhatsApp.exe` from the latest [GitHub Release](https://github.com/chsprs/whatsapp-web.view/releases).
+Unduh file dari [GitHub Releases](https://github.com/chsprs/whatsapp-web.view/releases/latest):
 
-Run the executable, scan the QR code, allow camera and microphone access when prompted by Windows, and keep using WhatsApp normally. The session is saved automatically.
+1. **Installer Setup (Disarankan)**: Unduh `WhatsApp-Setup.exe`. Jalankan installer untuk memasang otomatis ke Windows, menambahkan shortcut di **Start Menu** (otomatis muncul di Windows Search) dan **Desktop**, serta menyediakan fitur Uninstall di Windows Settings.
+2. **Portable Executable**: Unduh `WhatsApp.exe` untuk penggunaan langsung tanpa instalasi.
+
+Jalankan aplikasi, scan kode QR dengan aplikasi WhatsApp di ponsel, izinkan akses kamera/mikrofon saat diminta Windows jika ingin memakai voice/video call. Sesi login tersimpan otomatis.
 
 ## Security & Hardening
 
