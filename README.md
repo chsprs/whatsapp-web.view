@@ -10,6 +10,8 @@ Lightweight Windows desktop wrapper for [WhatsApp Web](https://web.whatsapp.com)
 - Dark Windows title bar and frame.
 - Windows toast notification bridge.
 - Camera and microphone access for WhatsApp voice and video calls.
+- **Auto Always-on-Top saat Video Call:** Jendela WhatsApp otomatis menjadi *always-on-top* di depan aplikasi lain saat mendeteksi panggilan/video call aktif, dan kembali normal saat selesai.
+- **Manual Always-on-Top Toggle:** Tekan `Ctrl + F11` untuk mengunci jendela selalu di depan (pin on top) kapan saja secara manual.
 - Single-instance protection.
 - High-DPI display support.
 - Small native executable.

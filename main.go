@@ -21,6 +21,7 @@ var (
 	procFindWindow    = user32.NewProc("FindWindowW")
 	procSetFgWindow   = user32.NewProc("SetForegroundWindow")
 	procShowNormal    = user32.NewProc("ShowWindow")
+	procSetWindowPos  = user32.NewProc("SetWindowPos")
 	procDwmSetAttr    = dwmapi.NewProc("DwmSetWindowAttribute")
 )
 
@@ -30,12 +31,35 @@ const (
 	mutexName   = "WhatsAppDesktopSingleInstanceMutex"
 	userAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
+	// SetWindowPos flags
+	HWND_TOPMOST   = ^uintptr(0) // -1
+	HWND_NOTOPMOST = ^uintptr(1) // -2
+	SWP_NOSIZE     = 0x0001
+	SWP_NOMOVE     = 0x0002
+	SWP_SHOWWINDOW = 0x0040
+
 	// DWM Window Attributes for Dark Theme
 	DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
 	DWMWA_USE_IMMERSIVE_DARK_MODE             = 20
 	DWMWA_CAPTION_COLOR                      = 35
 	DWMWA_TEXT_COLOR                         = 36
 )
+
+func setAlwaysOnTop(hwnd uintptr, enable bool) {
+	target := HWND_NOTOPMOST
+	if enable {
+		target = HWND_TOPMOST
+	}
+	procSetWindowPos.Call(
+		hwnd,
+		target,
+		0,
+		0,
+		0,
+		0,
+		SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW,
+	)
+}
 
 func setDarkWindowFrame(hwnd uintptr) {
 	darkMode := int32(1)
@@ -172,7 +196,12 @@ func main() {
 		go showNativeNotification(title, body, iconFullPath)
 	})
 
-	// Inject JS: User-Agent spoofing + Notification API polyfill connecting to Go native Toast
+	// Bind window topmost bridge
+	_ = w.Bind("setAlwaysOnTop", func(enable bool) {
+		setAlwaysOnTop(hwnd, enable)
+	})
+
+	// Inject JS: User-Agent spoofing + Notification API polyfill connecting to Go native Toast + Video Call detector
 	initScript := `
 		// UserAgent override
 		Object.defineProperty(navigator, 'userAgent', {
@@ -204,6 +233,75 @@ func main() {
 				}
 				return p;
 			};
+		})();
+
+		// Video Call Auto Always-on-Top & Manual Hotkey (Ctrl+F11)
+		(function() {
+			let isManualPinned = false;
+			let isCallActive = false;
+
+			function updateTopmostState() {
+				const shouldBeTop = isManualPinned || isCallActive;
+				if (window.setAlwaysOnTop) {
+					window.setAlwaysOnTop(shouldBeTop);
+				}
+			}
+
+			// Toggle hotkey Ctrl + F11
+			window.addEventListener('keydown', function(e) {
+				if (e.ctrlKey && e.key === 'F11') {
+					e.preventDefault();
+					isManualPinned = !isManualPinned;
+					updateTopmostState();
+					if (window.sendNativeNotification) {
+						window.sendNativeNotification(
+							'WhatsApp Desktop',
+							isManualPinned ? 'Mode Always-on-Top AKTIF (Selalu di Depan)' : 'Mode Always-on-Top NONAKTIF'
+						);
+					}
+				}
+			});
+
+			// Periodic & mutation checking for active video/audio call
+			function checkActiveCall() {
+				// Detect active call elements in WhatsApp Web:
+				// 1. HTML5 video elements that are playing
+				// 2. Elements with call-related data-testid or aria-labels
+				let callDetected = false;
+
+				const videos = document.querySelectorAll('video');
+				for (let i = 0; i < videos.length; i++) {
+					const v = videos[i];
+					if (v && !v.paused && v.readyState > 0 && v.srcObject) {
+						callDetected = true;
+						break;
+					}
+				}
+
+				if (!callDetected) {
+					// Fallback selector for WhatsApp Call floating banner / modal
+					const callContainers = document.querySelectorAll(
+						'[data-testid="call-banner"], [data-testid="call-modal"], [data-testid="video-call"], [aria-label*="Call"], [aria-label*="Panggilan"]'
+					);
+					if (callContainers.length > 0) {
+						for (let j = 0; j < callContainers.length; j++) {
+							const el = callContainers[j];
+							// Check if element is visible and contains call control buttons (hangup, mute, etc.)
+							if (el.offsetParent !== null && el.querySelector('button')) {
+								callDetected = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (callDetected !== isCallActive) {
+					isCallActive = callDetected;
+					updateTopmostState();
+				}
+			}
+
+			setInterval(checkActiveCall, 1000);
 		})();
 	`
 
