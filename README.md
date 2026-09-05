@@ -22,9 +22,16 @@ Lightweight Windows desktop wrapper for [WhatsApp Web](https://web.whatsapp.com)
 
 ## Download
 
-Download `WhatsApp.exe` from the latest [GitHub Release](https://github.com/Adytm404/whatsapp-web.view/releases).
+Download `WhatsApp.exe` from the latest [GitHub Release](https://github.com/chsprs/whatsapp-web.view/releases).
 
 Run the executable, scan the QR code, allow camera and microphone access when prompted by Windows, and keep using WhatsApp normally. The session is saved automatically.
+
+## Security & Hardening
+
+- **Sanitized Notification Bridge:** Native toast text is sanitized to prevent CDATA breakout or malicious script execution via Windows notification polyfill.
+- **Reproducible Clean Build:** Windows resource object (`rsrc.syso`) is regenerated directly from manifest and clean icon.
+- **Isolated Storage:** Data stored strictly within local `%APPDATA%\WhatsAppDesktopLight\UserData`.
+- **Zero Telemetry:** Direct HTTPS connection only to `https://web.whatsapp.com`.
 
 ## Session Data
 

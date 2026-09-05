@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -100,7 +101,28 @@ func getUserDataDir() string {
 	return dir
 }
 
+func sanitizeNotificationText(s string) string {
+	// Strip CDATA terminator and dangerous control characters
+	s = strings.ReplaceAll(s, "]]>", "")
+	var sb strings.Builder
+	for _, r := range s {
+		if r >= 32 || r == '\n' || r == '\r' || r == '\t' {
+			sb.WriteRune(r)
+		}
+	}
+	res := strings.TrimSpace(sb.String())
+	if len(res) > 250 {
+		res = res[:250] + "..."
+	}
+	return res
+}
+
 func showNativeNotification(title, message, iconPath string) {
+	title = sanitizeNotificationText(title)
+	message = sanitizeNotificationText(message)
+	if title == "" && message == "" {
+		return
+	}
 	notification := toast.Notification{
 		AppID:   "WhatsApp Desktop",
 		Title:   title,
