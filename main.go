@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/go-toast/toast"
@@ -14,15 +16,23 @@ import (
 )
 
 var (
-	kernel32          = windows.NewLazySystemDLL("kernel32.dll")
-	user32            = windows.NewLazySystemDLL("user32.dll")
-	dwmapi            = windows.NewLazySystemDLL("dwmapi.dll")
-	procCreateMutex   = kernel32.NewProc("CreateMutexW")
-	procFindWindow    = user32.NewProc("FindWindowW")
-	procSetFgWindow   = user32.NewProc("SetForegroundWindow")
-	procShowNormal    = user32.NewProc("ShowWindow")
-	procSetWindowPos  = user32.NewProc("SetWindowPos")
-	procDwmSetAttr    = dwmapi.NewProc("DwmSetWindowAttribute")
+	kernel32                     = windows.NewLazySystemDLL("kernel32.dll")
+	user32                       = windows.NewLazySystemDLL("user32.dll")
+	dwmapi                       = windows.NewLazySystemDLL("dwmapi.dll")
+	procCreateMutex              = kernel32.NewProc("CreateMutexW")
+	procFindWindow               = user32.NewProc("FindWindowW")
+	procSetFgWindow              = user32.NewProc("SetForegroundWindow")
+	procShowNormal               = user32.NewProc("ShowWindow")
+	procSetWindowPos             = user32.NewProc("SetWindowPos")
+	procDwmSetAttr               = dwmapi.NewProc("DwmSetWindowAttribute")
+	procCreateToolhelp32Snapshot = kernel32.NewProc("CreateToolhelp32Snapshot")
+	procProcess32First           = kernel32.NewProc("Process32FirstW")
+	procProcess32Next            = kernel32.NewProc("Process32NextW")
+	procEnumWindows              = user32.NewProc("EnumWindows")
+	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
+	procIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	procGetClassName             = user32.NewProc("GetClassNameW")
+	procGetWindowText            = user32.NewProc("GetWindowTextW")
 )
 
 const (
@@ -36,6 +46,7 @@ const (
 	HWND_NOTOPMOST = ^uintptr(1) // -2
 	SWP_NOSIZE     = 0x0001
 	SWP_NOMOVE     = 0x0002
+	SWP_NOACTIVATE = 0x0010
 	SWP_SHOWWINDOW = 0x0040
 
 	// DWM Window Attributes for Dark Theme
@@ -44,6 +55,86 @@ const (
 	DWMWA_CAPTION_COLOR                      = 35
 	DWMWA_TEXT_COLOR                         = 36
 )
+
+type processEntry32 struct {
+	Size            uint32
+	Usage           uint32
+	ProcessID       uint32
+	DefaultHeapID   uintptr
+	ModuleID        uint32
+	Threads         uint32
+	ParentProcessID uint32
+	PriClassBase    int32
+	Flags           uint32
+	ExeFile         [260]uint16
+}
+
+func getAllRelatedPIDs(rootPID uint32) map[uint32]bool {
+	pids := map[uint32]bool{rootPID: true}
+	hSnap, _, _ := procCreateToolhelp32Snapshot.Call(2, 0) // TH32CS_SNAPPROCESS
+	if hSnap == 0 || hSnap == uintptr(syscall.InvalidHandle) {
+		return pids
+	}
+	defer windows.CloseHandle(windows.Handle(hSnap))
+
+	var entry processEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+
+	ret, _, _ := procProcess32First.Call(hSnap, uintptr(unsafe.Pointer(&entry)))
+	parentMap := make(map[uint32]uint32)
+	for ret != 0 {
+		parentMap[entry.ProcessID] = entry.ParentProcessID
+		ret, _, _ = procProcess32Next.Call(hSnap, uintptr(unsafe.Pointer(&entry)))
+	}
+
+	changed := true
+	for changed {
+		changed = false
+		for child, parent := range parentMap {
+			if pids[parent] && !pids[child] {
+				pids[child] = true
+				changed = true
+			}
+		}
+	}
+	return pids
+}
+
+func setAllAppWindowsAlwaysOnTop(rootPID uint32, enable bool) {
+	target := HWND_NOTOPMOST
+	if enable {
+		target = HWND_TOPMOST
+	}
+	pids := getAllRelatedPIDs(rootPID)
+	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+		vis, _, _ := procIsWindowVisible.Call(hwnd)
+		if vis == 0 {
+			return 1
+		}
+		var pid uint32
+		procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+		if pids[pid] {
+			var clsBuf [256]uint16
+			procGetClassName.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
+			cls := syscall.UTF16ToString(clsBuf[:])
+
+			// Skip IME system windows
+			if cls != "MSCTFIME UI" && cls != "IME" {
+				procSetWindowPos.Call(
+					hwnd,
+					target,
+					0,
+					0,
+					0,
+					0,
+					SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW,
+				)
+			}
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
+}
 
 func setAlwaysOnTop(hwnd uintptr, enable bool) {
 	target := HWND_NOTOPMOST
@@ -191,15 +282,41 @@ func main() {
 	w.SetTitle(windowTitle)
 	w.SetSize(1100, 750, webview2.HintNone)
 
+	rootPID := uint32(os.Getpid())
+
 	// Bind native notification bridge
 	_ = w.Bind("sendNativeNotification", func(title, body string) {
 		go showNativeNotification(title, body, iconFullPath)
 	})
 
-	// Bind window topmost bridge
+	// Bind window topmost bridge for all related windows (main window + popups like "Move to new window")
 	_ = w.Bind("setAlwaysOnTop", func(enable bool) {
-		setAlwaysOnTop(hwnd, enable)
+		setAllAppWindowsAlwaysOnTop(rootPID, enable)
 	})
+
+	// Background ticker to keep newly spawned windows (like video call popups) pinned if topmost is active
+	var (
+		topmostActive bool
+		topmostMu     sync.Mutex
+	)
+	_ = w.Bind("setAlwaysOnTop", func(enable bool) {
+		topmostMu.Lock()
+		topmostActive = enable
+		topmostMu.Unlock()
+		setAllAppWindowsAlwaysOnTop(rootPID, enable)
+	})
+
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			topmostMu.Lock()
+			active := topmostActive
+			topmostMu.Unlock()
+			if active {
+				setAllAppWindowsAlwaysOnTop(rootPID, true)
+			}
+		}
+	}()
 
 	// Inject JS: User-Agent spoofing + Notification API polyfill connecting to Go native Toast + Video Call detector
 	initScript := `
@@ -279,7 +396,7 @@ func main() {
 				}
 
 				if (!callDetected) {
-					// Fallback selector for WhatsApp Call floating banner / modal
+					// Fallback selector for WhatsApp Call floating banner / modal / new window popup
 					const callContainers = document.querySelectorAll(
 						'[data-testid="call-banner"], [data-testid="call-modal"], [data-testid="video-call"], [aria-label*="Call"], [aria-label*="Panggilan"]'
 					);
@@ -292,6 +409,14 @@ func main() {
 								break;
 							}
 						}
+					}
+				}
+
+				// Check if current window or document is the popout call window itself
+				if (!callDetected) {
+					const url = window.location.href;
+					if (url.includes('call') || document.title.includes('Call') || document.title.includes('Panggilan')) {
+						callDetected = true;
 					}
 				}
 
